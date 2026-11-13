@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rohstoff-Kompass</title>
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rohstoffe">
+<meta name="theme-color" content="#11151c">
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#151a22;--mut:#667085;--line:#e3e6ea;--up:#0b7a4b;--dn:#b3261e;--warn:#8a5a00;--warnbg:#fff4d6;--acc:#1d4ed8}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1016;--card:#161b24;--fg:#e8ebf0;--mut:#93a0b4;--line:#28303d;--up:#3ecf8e;--dn:#ff7a70;--warn:#f5c451;--warnbg:#2b2410;--acc:#7aa2ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}
+main{max-width:1100px;margin:0 auto}
+h1{font-size:22px;margin:0}
+.sub{color:var(--mut);font-size:13px;margin:2px 0 14px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.warn{background:var(--warnbg);color:var(--warn);border-color:transparent;font-size:14px;margin-bottom:12px}
+.calc{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:12px}
+label{font-size:12px;color:var(--mut);display:flex;flex-direction:column;gap:4px;flex:1 1 130px}
+input{font:inherit;padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:100%}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.name{font-weight:650;font-size:17px}
+.price{font-variant-numeric:tabular-nums;color:var(--mut)}
+.badge{display:inline-block;font-weight:700;font-size:13px;letter-spacing:.04em;padding:4px 10px;border-radius:99px;margin:8px 0;border:1.5px solid currentColor}
+.KAUFEN,.HALTEN{color:var(--up)}.SCHLIESSEN{color:var(--dn)}.WARTEN{color:var(--mut)}
+svg{width:100%;height:56px;display:block;margin:4px 0 8px}
+dl{display:grid;grid-template-columns:1fr auto;gap:3px 10px;margin:0;font-size:14px}
+dt{color:var(--mut)}dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.pos{color:var(--up)}.neg{color:var(--dn)}
+.hint{font-size:13px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);color:var(--mut)}
+details{margin-top:14px;font-size:14px}summary{cursor:pointer;font-weight:600}
+table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}
+td,th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}
+td:first-child,th:first-child{text-align:left}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<main>
+<h1>Rohstoff-Kompass</h1>
+<div class="sub" id="upd">Lade Daten …</div>
+<div class="box warn" id="warn"></div>
+<div class="box calc">
+  <label>Kontogröße (in Kontowährung)<input id="acct" type="number" inputmode="decimal" min="0" value="1000"></label>
+  <label>Risiko pro Trade (%)<input id="risk" type="number" inputmode="decimal" min="0.1" max="5" step="0.1" value="1"></label>
+  <label>1 USD in Kontowährung (z. B. EUR)<input id="fx" type="number" inputmode="decimal" step="0.01" value="0.92"></label>
+</div>
+<div class="grid" id="grid"></div>
+<details class="box"><summary>Backtest: was die Regeln in 15 Jahren gebracht hätten</summary><div class="scroll" id="bt"></div></details>
+<details class="box"><summary>So funktionieren die Signale</summary>
+<p><b>Trendsignal (Hauptsignal, nur Kauf):</b> KAUFEN, wenn der Schlusskurs über dem Kurs von vor 12 Monaten und über dem 50-Tage-Durchschnitt liegt. HALTEN, solange das 12-Monats-Momentum positiv ist. SCHLIESSEN, sobald es negativ wird oder der Notfall-Stop (4 × ATR unter dem Einstieg) erreicht ist. Einstieg und Ausstieg jeweils zur nächsten Eröffnung.</p>
+<p><b>Rücksetzer-Hinweis:</b> RSI(2) unter 10 im Aufwärtstrend. Trifft oft (ca. 6 von 10), hat im Test nach Kosten aber Geld verloren – deshalb nur als Zusatzinfo, nicht als Signal.</p>
+<p><b>Stückzahl:</b> (Konto × Risiko %) ÷ (Abstand Einstieg–Stop). So verlierst du am Stop ungefähr den eingestellten Prozentsatz. Kurslücken können den Verlust größer machen.</p>
+<p>Daten: Tageskurse der Futures (Yahoo Finance). Trading-212-CFD-Kurse weichen leicht ab; Spread und Übernacht-Zinsen sind geschätzt. Die App platziert keine Orders – Trading 212 bietet für CFD-Konten keine Schnittstelle dafür.</p>
+</details>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const nf=(x,d)=>x==null?"–":x.toLocaleString("de-DE",{minimumFractionDigits:d,maximumFractionDigits:d});
+const dec=p=>p<10?3:p<100?2:1;
+const day=t=>new Date(t*1000).toLocaleDateString("de-DE");
+const sgn=(x,d,u)=>`<span class="${x>0?"pos":x<0?"neg":""}">${x>0?"+":""}${nf(x,d)}${u||""}</span>`;
+let DATA=null;
+for(const k of ["acct","risk","fx"]){try{const v=localStorage.getItem("rk_"+k);if(v)$(k).value=v}catch(e){}
+  $(k).addEventListener("input",()=>{try{localStorage.setItem("rk_"+k,$(k).value)}catch(e){};render()})}
+function spark(c,ref){const w=300,h=56,mn=Math.min(...c),mx=Math.max(...c),r=mx-mn||1;
+  const pts=c.map((v,i)=>(i*w/(c.length-1)).toFixed(1)+","+(h-3-(v-mn)/r*(h-6)).toFixed(1)).join(" ");
+  const col=c[c.length-1]>=c[0]?"var(--up)":"var(--dn)";
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Kursverlauf 12 Monate"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`}
+const TXT={KAUFEN:"Neues Kaufsignal – Einstieg zur nächsten Eröffnung.",HALTEN:"Trend intakt – Position laut Regel halten.",SCHLIESSEN:"Momentum negativ – Position laut Regel schließen.",WARTEN:"Kein Aufwärtstrend – kein Trade."};
+function render(){if(!DATA)return;const d=DATA;
+  const acct=+$("acct").value||0,risk=+$("risk").value||0,fx=+$("fx").value||1,riskAmt=acct*risk/100;
+  $("upd").textContent="Stand: "+new Date(d.updated).toLocaleString("de-DE")+" · Tageskurse, Preise in USD";
+  const t=d.trend_all,p=d.pullback_all;
+  $("warn").innerHTML=`<b>Ehrlich gesagt:</b> Kein Indikator garantiert Gewinne. Im ${d.years}-Jahres-Test hätte das Trendsignal über alle 8 Märkte nur ${nf(t.win,0)} % Gewinn-Trades gehabt und insgesamt ${sgn(t.total,1," R")} gebracht (R = Risiko pro Trade) – praktisch null. Nur Gold war klar positiv. Die Variante mit hoher Trefferquote (${nf(p.win,0)} %) hätte ${sgn(p.total,1," R")} verloren. CFDs sind gehebelt; die meisten Privatkonten verlieren damit Geld.`;
+  $("grid").innerHTML=d.items.map(it=>{const dp=dec(it.price),s=it.trend_stats;
+    let rows=`<dt>12-Monats-Momentum</dt><dd>${sgn(it.mom12,1," %")}</dd>`;
+    if(it.state!=="WARTEN"){const dist=it.entry-it.stop,units=dist>0?riskAmt/(dist*fx):0;
+      rows+=`<dt>${it.state==="KAUFEN"?"Einstieg ca.":"Einstieg ("+day(it.entry_date)+")"}</dt><dd>${nf(it.entry,dp)}</dd>
+      <dt>Notfall-Stop</dt><dd>${nf(it.stop,dp)}</dd>`;
+      if(it.open_r!=null)rows+=`<dt>Laufendes Ergebnis</dt><dd>${sgn(it.open_r,2," R")}</dd>`;
+      if(it.state==="KAUFEN")rows+=`<dt>Stückzahl bei ${nf(risk,1)} % Risiko</dt><dd>${nf(units,units<10?2:0)}</dd><dt>Positionswert</dt><dd>${nf(units*it.entry*fx,0)}</dd>`}
+    rows+=`<dt>Test ${d.years} J.: Trades / Gewinner</dt><dd>${s.n} / ${nf(s.win,0)} %</dd><dt>Test: Ergebnis gesamt</dt><dd>${sgn(s.total,1," R")}</dd>`;
+    return `<div class="box"><div class="head"><span class="name">${it.name}</span><span class="price">${nf(it.price,dp)}</span></div>
+      <span class="badge ${it.state}">${it.state}</span>${spark(it.closes)}<dl>${rows}</dl>
+      <div class="hint">${TXT[it.state]}${it.pullback?" Rücksetzer aktiv (RSI2 "+nf(it.rsi2,0)+").":""}${s.total<=0?" Achtung: Regel war in diesem Markt im Test nicht profitabel.":""}</div></div>`}).join("");
+  const row=(n,a,b)=>`<tr><td>${n}</td><td>${a.n}</td><td>${nf(a.win,0)} %</td><td>${sgn(a.total,1)}</td><td>${nf(a.maxdd,1)}</td><td>${b.n}</td><td>${nf(b.win,0)} %</td><td>${sgn(b.total,1)}</td></tr>`;
+  $("bt").innerHTML=`<table><tr><th>Markt</th><th>Trend: Trades</th><th>Gewinner</th><th>Summe R</th><th>Max. Rückgang R</th><th>Rücksetzer: Trades</th><th>Gewinner</th><th>Summe R</th></tr>${d.items.map(i=>row(i.name,i.trend_stats,i.pullback_stats)).join("")}${row("<b>Alle</b>",t,p)}</table><p>Nach geschätzten Kosten (Spread + ${nf(d.swap,2)} % Finanzierung pro Nacht). Vergangene Ergebnisse sagen nichts Sicheres über die Zukunft.</p>`}
+fetch("data.json?"+Date.now()).then(r=>r.json()).then(j=>{DATA=j;render()}).catch(()=>{$("upd").textContent="Daten konnten nicht geladen werden."});
+</script>
+</body>
+</html>
